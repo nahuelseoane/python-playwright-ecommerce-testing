@@ -1,5 +1,6 @@
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
+base_url = "https://practicesoftwaretesting.com"
 testpaths = ["tests"]
 markers = [
     "smoke: critical tests that verify the application is available",
