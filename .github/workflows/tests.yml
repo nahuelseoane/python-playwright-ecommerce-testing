@@ -8,10 +8,10 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -21,26 +21,77 @@ jobs:
 
   e2e:
     needs: lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      # Settings read by the Toolshop docker-compose file.
+      SPRINT: sprint5
+      DISABLE_LOGGING: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+
+      # The app under test, pinned to a known commit so CI stays stable.
+      - name: Check out the Toolshop app
+        uses: actions/checkout@v5
+        with:
+          repository: testsmith-io/practice-software-testing
+          ref: ae7caecb811dd8952c09d997e69be7cb946ecd44
+          path: toolshop
+
+      - name: Start the app in Docker
+        working-directory: toolshop
+        run: |
+          docker compose -f docker-compose.yml up -d
+          docker compose exec -T -u root laravel-api composer install --no-dev --optimize-autoloader --ignore-platform-req=ext-ffi
+
+      - name: Wait for the database
+        working-directory: toolshop
+        run: |
+          for i in $(seq 1 30); do
+            docker compose exec -T mariadb mysqladmin ping -h localhost -u root -proot --silent && exit 0
+            sleep 2
+          done
+          echo "MariaDB did not start"; exit 1
+
+      - name: Create and seed the database
+        working-directory: toolshop
+        run: docker compose exec -T laravel-api php artisan migrate:refresh --seed
+
+      - name: Wait for the API and the UI
+        run: |
+          curl --retry 30 --retry-delay 2 --retry-all-errors -fsS http://localhost:8091/status
+          for i in $(seq 1 60); do
+            curl -fs -o /dev/null http://localhost:4200 && exit 0
+            sleep 5
+          done
+          echo "Angular UI did not start"; exit 1
+
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
+
+      # --base-url overrides pyproject.toml, so local runs still use the live site.
       - name: Run tests
         run: >
           python -m pytest --browser chromium
+          --base-url http://localhost:4200
           --tracing retain-on-failure
           --html=report.html --self-contained-html
+
+      - name: Show app logs
+        if: failure()
+        working-directory: toolshop
+        run: docker compose logs --tail 100
+
       - name: Upload report and traces
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-report
           path: |
