@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: ubuntu-24.04
@@ -39,9 +42,21 @@ jobs:
 
       - name: Start the app in Docker
         working-directory: toolshop
+        run: docker compose -f docker-compose.yml up -d mariadb laravel-api web angular-ui
+
+      # Composer downloads PHP packages from GitHub. Signing in with the job's
+      # token avoids anonymous download limits; retry in case of network hiccups.
+      - name: Install the API's PHP packages
+        working-directory: toolshop
+        env:
+          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
         run: |
-          docker compose -f docker-compose.yml up -d
-          docker compose exec -T -u root laravel-api composer install --no-dev --optimize-autoloader --ignore-platform-req=ext-ffi
+          for i in 1 2 3; do
+            docker compose -f docker-compose.yml run --rm -e COMPOSER_AUTH composer && exit 0
+            echo "Composer failed (attempt $i), retrying..."
+            sleep 10
+          done
+          exit 1
 
       - name: Wait for the database
         working-directory: toolshop
@@ -91,7 +106,7 @@ jobs:
 
       - name: Upload report and traces
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: test-report
           path: |
