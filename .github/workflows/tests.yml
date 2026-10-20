@@ -48,11 +48,9 @@ jobs:
       # token avoids anonymous download limits; retry in case of network hiccups.
       - name: Install the API's PHP packages
         working-directory: toolshop
-        env:
-          COMPOSER_AUTH: '{"github-oauth": {"github.com": "${{ secrets.GITHUB_TOKEN }}"}}'
         run: |
           for i in 1 2 3; do
-            docker compose -f docker-compose.yml run --rm -e COMPOSER_AUTH composer && exit 0
+            docker compose -f docker-compose.yml run --rm composer && exit 0
             echo "Composer failed (attempt $i), retrying..."
             sleep 10
           done
